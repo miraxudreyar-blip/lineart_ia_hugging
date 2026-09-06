@@ -1,39 +1,47 @@
 import io
 
+import numpy as np
 import torch
 from flask import Flask, jsonify, render_template, request, send_file
 from PIL import Image
-from transformers import pipeline
+from transformers import AutoImageProcessor, AutoModel
 
 app = Flask(__name__)
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp"}
+REPO_NAME = "p1atdev/MangaLineExtraction-hf"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print("Carregando o modelo de limpeza de lineart (só demora na primeira vez)...")
-pipe = pipeline(
-    "image-to-image",
-    model="p1atdev/MangaLineExtraction-hf",
-    trust_remote_code=True,
-    device=0 if torch.cuda.is_available() else -1,
-)
-print("Modelo carregado. Servidor pronto.")
+model = AutoModel.from_pretrained(REPO_NAME, trust_remote_code=True).to(DEVICE).eval()
+processor = AutoImageProcessor.from_pretrained(REPO_NAME, trust_remote_code=True)
+print(f"Modelo carregado em {DEVICE}. Servidor pronto.")
 
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
-def to_pil_image(saida):
-    """Normaliza o retorno do pipeline para um PIL.Image, seja qual for o formato exato."""
-    if isinstance(saida, list):
-        saida = saida[0]
-    if isinstance(saida, dict):
-        saida = saida.get("image") or saida.get("pixel_values") or next(iter(saida.values()))
-    if isinstance(saida, Image.Image):
-        return saida
-    import numpy as np
+def limpar_lineart(imagem: Image.Image) -> Image.Image:
+    inputs = processor(imagem, return_tensors="pt")
+    pixel_values = inputs.pixel_values.to(DEVICE)
 
-    return Image.fromarray(np.asarray(saida).astype("uint8"))
+    with torch.no_grad():
+        outputs = model(pixel_values)
+
+    saida = outputs.pixel_values[0]
+    if isinstance(saida, torch.Tensor):
+        saida = saida.cpu().numpy()
+
+    arr = np.asarray(saida)
+    if arr.ndim == 3 and arr.shape[0] in (1, 3):  # (C, H, W) -> (H, W[, C])
+        arr = np.transpose(arr, (1, 2, 0))
+        if arr.shape[-1] == 1:
+            arr = arr[:, :, 0]
+
+    arr = np.clip(arr, 0, 255).astype("uint8")
+    modo = "L" if arr.ndim == 2 else "RGB"
+    return Image.fromarray(arr, mode=modo)
 
 
 @app.route("/")
@@ -56,7 +64,7 @@ def limpar():
         return jsonify({"erro": "Não foi possível abrir essa imagem."}), 400
 
     try:
-        resultado = to_pil_image(pipe(imagem))
+        resultado = limpar_lineart(imagem)
     except Exception as e:
         return jsonify({"erro": f"Falha ao processar a imagem: {e}"}), 500
 
