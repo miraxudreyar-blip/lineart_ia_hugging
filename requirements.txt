@@ -1,4 +1,7 @@
-flask
+Flask
+gunicorn
 torch
 transformers
-pillow
+Pillow
+numpy
+loadimg
