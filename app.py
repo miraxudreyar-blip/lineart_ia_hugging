@@ -11,6 +11,7 @@ app = Flask(__name__)
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "bmp"}
 REPO_NAME = "p1atdev/MangaLineExtraction-hf"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MAX_LADO = 900  # limite de pixels no maior lado, para não estourar o tempo em CPU fraca
 
 print("Carregando o modelo de limpeza de lineart (só demora na primeira vez)...")
 model = AutoModel.from_pretrained(REPO_NAME, trust_remote_code=True).to(DEVICE).eval()
@@ -22,7 +23,18 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
+def redimensionar_se_grande(imagem: Image.Image) -> Image.Image:
+    largura, altura = imagem.size
+    maior_lado = max(largura, altura)
+    if maior_lado <= MAX_LADO:
+        return imagem
+    escala = MAX_LADO / maior_lado
+    novo_tamanho = (int(largura * escala), int(altura * escala))
+    return imagem.resize(novo_tamanho, Image.LANCZOS)
+
+
 def limpar_lineart(imagem: Image.Image) -> Image.Image:
+    imagem = redimensionar_se_grande(imagem)
     inputs = processor(imagem, return_tensors="pt")
     pixel_values = inputs.pixel_values.to(DEVICE)
 
