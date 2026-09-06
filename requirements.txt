@@ -1,7 +1,7 @@
 Flask
 gunicorn
 torch
-transformers
+transformers==4.46.3
 Pillow
 numpy
 loadimg
